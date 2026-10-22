@@ -128,7 +128,41 @@ export const GuideView: React.FC<GuideViewProps> = ({ guide, onBack, onOpenExpor
   };
 
   const handleShare = () => {
-    navigator.clipboard.writeText(window.location.href);
+    const origin = window.location.origin;
+    const pathname = window.location.pathname;
+    const shareUrl = `${origin}${pathname}#/guide/${encodeURIComponent(guide.id)}`;
+    
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(shareUrl).catch(() => {
+        try {
+          const ta = document.createElement('textarea');
+          ta.value = shareUrl;
+          ta.style.position = 'fixed';
+          ta.style.opacity = '0';
+          document.body.appendChild(ta);
+          ta.focus();
+          ta.select();
+          document.execCommand('copy');
+          ta.remove();
+        } catch (e) {
+          console.warn('Fallback copy failed', e);
+        }
+      });
+    } else {
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = shareUrl;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.focus();
+        ta.select();
+        document.execCommand('copy');
+        ta.remove();
+      } catch (e) {
+        console.warn('Fallback copy failed', e);
+      }
+    }
     setShareCopied(true);
     setTimeout(() => setShareCopied(false), 2000);
   };
