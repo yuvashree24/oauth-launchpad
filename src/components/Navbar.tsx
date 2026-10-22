@@ -27,7 +27,38 @@ export const Navbar: React.FC<NavbarProps> = ({
   const [copiedLink, setCopiedLink] = useState(false);
 
   const handleShare = () => {
-    navigator.clipboard.writeText(window.location.href);
+    const url = window.location.href;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(url).catch(() => {
+        try {
+          const ta = document.createElement('textarea');
+          ta.value = url;
+          ta.style.position = 'fixed';
+          ta.style.opacity = '0';
+          document.body.appendChild(ta);
+          ta.focus();
+          ta.select();
+          document.execCommand('copy');
+          ta.remove();
+        } catch (e) {
+          console.warn('Fallback copy failed', e);
+        }
+      });
+    } else {
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = url;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.focus();
+        ta.select();
+        document.execCommand('copy');
+        ta.remove();
+      } catch (e) {
+        console.warn('Fallback copy failed', e);
+      }
+    }
     setCopiedLink(true);
     setTimeout(() => setCopiedLink(false), 2000);
   };
