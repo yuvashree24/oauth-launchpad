@@ -1,6 +1,7 @@
 import express from 'express';
 import { createServer as createViteServer } from 'vite';
 import path from 'path';
+import fs from 'node:fs';
 import dotenv from 'dotenv';
 import { GoogleGenAI } from '@google/genai';
 import { fileURLToPath } from 'url';
@@ -46,6 +47,65 @@ if (process.env.DISABLE_HMR === undefined) {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+const DATA_DIR = path.resolve(__dirname, '.data');
+const GUIDES_FILE = path.join(DATA_DIR, 'saved_guides.json');
+
+// Ensure persistent .data directory exists
+if (!fs.existsSync(DATA_DIR)) {
+  try {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+  } catch (e) {
+    console.error('Could not create .data directory', e);
+  }
+}
+
+// In-memory cache of saved custom guides for ultra-fast lookup across sessions
+const savedGuidesMap = new Map<string, any>();
+
+function loadPersistedGuides() {
+  try {
+    if (fs.existsSync(GUIDES_FILE)) {
+      const content = fs.readFileSync(GUIDES_FILE, 'utf-8');
+      const parsed = JSON.parse(content);
+      if (parsed && typeof parsed === 'object') {
+        for (const [id, guide] of Object.entries(parsed)) {
+          savedGuidesMap.set(id.toLowerCase(), guide);
+        }
+      }
+    }
+  } catch (err) {
+    console.error('Failed to load persisted guides:', err);
+  }
+}
+
+function persistGuidesToFile() {
+  try {
+    const obj: Record<string, any> = {};
+    for (const [k, v] of savedGuidesMap.entries()) {
+      obj[k] = v;
+    }
+    fs.writeFileSync(GUIDES_FILE, JSON.stringify(obj, null, 2), 'utf-8');
+  } catch (err) {
+    console.error('Failed to persist guides to file:', err);
+  }
+}
+
+function storeCustomGuide(guide: any) {
+  if (!guide || !guide.id) return;
+  const normalizedId = String(guide.id).toLowerCase().trim();
+  savedGuidesMap.set(normalizedId, guide);
+  if (guide.name) {
+    const nameSlug = guide.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+    if (nameSlug && nameSlug !== normalizedId) {
+      savedGuidesMap.set(nameSlug, guide);
+    }
+  }
+  persistGuidesToFile();
+}
+
+// Seed on startup
+loadPersistedGuides();
+
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 const isProd = process.env.NODE_ENV === 'production';
@@ -72,8 +132,97 @@ app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
     hasGeminiKey: Boolean(geminiApiKey),
+    persistedGuidesCount: savedGuidesMap.size,
     timestamp: new Date().toISOString(),
   });
+});
+
+// Get all guides (curated + saved custom guides)
+app.get('/api/guides', (req, res) => {
+  const result: Record<string, any> = { ...CURATED_GUIDES };
+  for (const [k, v] of savedGuidesMap.entries()) {
+    result[k] = v;
+  }
+  res.json({ guides: result });
+});
+
+// Explicit save guide endpoint
+app.post('/api/guides', (req, res) => {
+  const { guide } = req.body;
+  if (!guide || !guide.id) {
+    return res.status(400).json({ error: 'Guide payload with valid ID is required' });
+  }
+  storeCustomGuide(guide);
+  res.json({ success: true, id: guide.id });
+});
+
+// Lookup specific guide by ID or slug (supports curated, saved custom, or on-demand generation)
+app.get('/api/guides/:id', (req, res) => {
+  const rawId = req.params.id;
+  if (!rawId) {
+    return res.status(400).json({ error: 'Guide ID is required' });
+  }
+
+  const normalizedId = rawId.toLowerCase().trim();
+
+  // 1. Check curated guides first
+  const matchedCurated = Object.values(CURATED_GUIDES).find(
+    (g: any) =>
+      g.id.toLowerCase() === normalizedId ||
+      g.name.toLowerCase() === normalizedId ||
+      g.name.toLowerCase().replace(/[^a-z0-9]+/g, '-') === normalizedId ||
+      normalizedId.includes(g.id.toLowerCase())
+  );
+
+  if (matchedCurated) {
+    return res.json({
+      guide: matchedCurated,
+      isCurated: true,
+      source: 'curated-database',
+    });
+  }
+
+  // 2. Check saved server-side custom guides
+  if (savedGuidesMap.has(normalizedId)) {
+    return res.json({
+      guide: savedGuidesMap.get(normalizedId),
+      isCurated: false,
+      source: 'saved-store',
+    });
+  }
+
+  for (const [key, guide] of savedGuidesMap.entries()) {
+    if (
+      key === normalizedId ||
+      guide.name?.toLowerCase() === normalizedId ||
+      guide.id?.toLowerCase() === normalizedId ||
+      guide.name?.toLowerCase().replace(/[^a-z0-9]+/g, '-') === normalizedId
+    ) {
+      return res.json({
+        guide,
+        isCurated: false,
+        source: 'saved-store',
+      });
+    }
+  }
+
+  // 3. Resilient on-demand generation for direct URLs (e.g. /#/guide/hubspot on fresh tab before manual generate)
+  try {
+    const dynamicGuide = buildDynamicGuide(
+      normalizedId.replace(/[-_]/g, ' '),
+      '',
+      'Verified Provider Documentation Knowledge',
+      false
+    );
+    storeCustomGuide(dynamicGuide);
+    return res.json({
+      guide: dynamicGuide,
+      isCurated: false,
+      source: 'generated-on-demand',
+    });
+  } catch (e) {
+    return res.status(404).json({ error: 'Guide not found' });
+  }
 });
 
 // AI-powered research endpoint with Google Search grounding & resilient fallback
@@ -98,6 +247,7 @@ app.post('/api/research', async (req, res) => {
   );
 
   if (matchedCurated) {
+    storeCustomGuide(matchedCurated);
     return res.json({
       guide: matchedCurated,
       groundingUrls: matchedCurated.evidenceSources.map((s) => ({
@@ -414,6 +564,7 @@ Output MUST be valid JSON only. Structure:
           }
         }
 
+        storeCustomGuide(parsedData);
         return res.json({
           guide: parsedData,
           groundingUrls: parsedData.evidenceSources.map((s: any) => ({
@@ -436,6 +587,7 @@ Output MUST be valid JSON only. Structure:
     false
   );
 
+  storeCustomGuide(dynamicGuide);
   return res.json({
     guide: dynamicGuide,
     groundingUrls: dynamicGuide.evidenceSources.map((s) => ({
