@@ -9,13 +9,15 @@ import { ExportModal } from './components/ExportModal';
 import { QuickSearchModal } from './components/QuickSearchModal';
 import { LiveResearchLoader } from './components/LiveResearchLoader';
 import { CURATED_GUIDES } from './data/curatedGuides';
-import { getAllGuides, getGuideById, saveCustomGuide } from './utils/storage';
+import { getAllGuides, getGuideById, saveCustomGuide, fetchGuideFromServer } from './utils/storage';
 import { buildDynamicGuide } from './utils/fallbackGuide';
 import { OAuthGuide } from './types/guide';
 import { Sparkles, ArrowRight, ShieldCheck, HelpCircle } from 'lucide-react';
 
 export default function App() {
   const [currentGuideId, setCurrentGuideId] = useState<string | null>(null);
+  const [loadedGuide, setLoadedGuide] = useState<OAuthGuide | null>(null);
+  const [isLoadingGuide, setIsLoadingGuide] = useState(false);
   const [isResearching, setIsResearching] = useState(false);
   const [researchQuery, setResearchQuery] = useState('');
   const [isApmBriefOpen, setIsApmBriefOpen] = useState(false);
@@ -25,21 +27,76 @@ export default function App() {
 
   // Parse URL hash for stable shareable URLs (#/guide/:id)
   useEffect(() => {
-    const handleHashChange = () => {
+    let isMounted = true;
+
+    const handleHashChange = async () => {
       const hash = window.location.hash;
       if (hash.startsWith('#/guide/')) {
-        const id = hash.replace('#/guide/', '').split('?')[0];
-        if (id) {
+        const id = hash.replace('#/guide/', '').split('?')[0]?.trim();
+        if (!id) {
+          if (isMounted) {
+            setCurrentGuideId(null);
+            setLoadedGuide(null);
+            setIsLoadingGuide(false);
+          }
+          return;
+        }
+
+        if (isMounted) {
           setCurrentGuideId(id);
         }
+
+        // 1. Check local cache first (curated + local storage)
+        const local = getGuideById(id);
+        if (local) {
+          if (isMounted) {
+            setLoadedGuide(local);
+            setIsLoadingGuide(false);
+          }
+          return;
+        }
+
+        // 2. Fetch from server persistence store (e.g. for new tabs or clean sessions)
+        if (isMounted) {
+          setIsLoadingGuide(true);
+        }
+
+        try {
+          const remote = await fetchGuideFromServer(id);
+          if (isMounted) {
+            if (remote) {
+              setLoadedGuide(remote);
+            } else {
+              // Resilient fallback: build dynamic guide so direct shared links never 404
+              const fallback = buildDynamicGuide(id.replace(/[-_]/g, ' '));
+              saveCustomGuide(fallback);
+              setLoadedGuide(fallback);
+            }
+            setIsLoadingGuide(false);
+          }
+        } catch (err) {
+          if (isMounted) {
+            const fallback = buildDynamicGuide(id.replace(/[-_]/g, ' '));
+            saveCustomGuide(fallback);
+            setLoadedGuide(fallback);
+            setIsLoadingGuide(false);
+          }
+        }
       } else {
-        setCurrentGuideId(null);
+        if (isMounted) {
+          setCurrentGuideId(null);
+          setLoadedGuide(null);
+          setIsLoadingGuide(false);
+        }
       }
     };
 
     handleHashChange();
     window.addEventListener('hashchange', handleHashChange);
-    return () => window.removeEventListener('hashchange', handleHashChange);
+    return () => {
+      isMounted = false;
+      window.removeEventListener('hashchange', handleHashChange);
+    };
   }, []);
 
   // Keyboard shortcut ⌘K / Ctrl+K
@@ -54,7 +111,13 @@ export default function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  const navigateToGuide = (id: string) => {
+  const navigateToGuide = (id: string, directGuide?: OAuthGuide) => {
+    if (directGuide) {
+      setLoadedGuide(directGuide);
+    } else {
+      const local = getGuideById(id);
+      if (local) setLoadedGuide(local);
+    }
     window.location.hash = `#/guide/${id}`;
     setCurrentGuideId(id);
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -63,6 +126,7 @@ export default function App() {
   const navigateHome = () => {
     window.location.hash = '#/';
     setCurrentGuideId(null);
+    setLoadedGuide(null);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -76,7 +140,7 @@ export default function App() {
     // 1. Check if it matches existing curated guides
     const existing = getGuideById(trimmed);
     if (existing) {
-      navigateToGuide(existing.id);
+      navigateToGuide(existing.id, existing);
       return;
     }
 
@@ -99,22 +163,30 @@ export default function App() {
 
       if (data.guide) {
         saveCustomGuide(data.guide);
-        navigateToGuide(data.guide.id);
+        setLoadedGuide(data.guide);
+        navigateToGuide(data.guide.id, data.guide);
       } else {
         const fallbackGuide = buildDynamicGuide(trimmed);
         saveCustomGuide(fallbackGuide);
-        navigateToGuide(fallbackGuide.id);
+        setLoadedGuide(fallbackGuide);
+        navigateToGuide(fallbackGuide.id, fallbackGuide);
       }
     } catch {
       const fallbackGuide = buildDynamicGuide(trimmed);
       saveCustomGuide(fallbackGuide);
-      navigateToGuide(fallbackGuide.id);
+      setLoadedGuide(fallbackGuide);
+      navigateToGuide(fallbackGuide.id, fallbackGuide);
     } finally {
       setIsResearching(false);
     }
   };
 
-  const selectedGuide = currentGuideId ? getGuideById(currentGuideId) : null;
+  const selectedGuide =
+    (currentGuideId && loadedGuide?.id?.toLowerCase() === currentGuideId.toLowerCase())
+      ? loadedGuide
+      : currentGuideId
+      ? (getGuideById(currentGuideId) || loadedGuide)
+      : null;
 
   return (
     <div className="min-h-screen bg-slate-950 font-sans text-slate-100 flex flex-col selection:bg-indigo-500/30 selection:text-indigo-200">
@@ -130,6 +202,8 @@ export default function App() {
       <main className="flex-1">
         {isResearching ? (
           <LiveResearchLoader query={researchQuery} />
+        ) : isLoadingGuide ? (
+          <LiveResearchLoader query={currentGuideId?.replace(/[-_]/g, ' ') || 'OAuth Guide'} />
         ) : selectedGuide ? (
           <GuideView
             guide={selectedGuide}
