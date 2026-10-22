@@ -32,6 +32,43 @@ export function saveCustomGuide(guide: OAuthGuide): void {
   } catch (e) {
     console.error('Failed to save custom guide in localStorage:', e);
   }
+
+  // Non-blocking sync to server persistence store
+  try {
+    fetch('/api/guides', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ guide }),
+    }).catch((err) => {
+      console.warn('Could not sync guide to server persistence:', err);
+    });
+  } catch {
+    // Ignore fetch sync failure
+  }
+}
+
+export async function fetchGuideFromServer(id: string): Promise<OAuthGuide | null> {
+  const normalizedId = id.toLowerCase().trim();
+  try {
+    const res = await fetch(`/api/guides/${encodeURIComponent(normalizedId)}`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (data && data.guide) {
+      // Cache locally
+      try {
+        const existing = getCustomGuides();
+        existing[data.guide.id] = data.guide;
+        localStorage.setItem(CUSTOM_GUIDES_KEY, JSON.stringify(existing));
+      } catch {
+        // Ignore localStorage error
+      }
+      return data.guide;
+    }
+    return null;
+  } catch (err) {
+    console.error('Failed to fetch guide from server:', err);
+    return null;
+  }
 }
 
 export function getCustomGuides(): Record<string, OAuthGuide> {
@@ -43,3 +80,4 @@ export function getCustomGuides(): Record<string, OAuthGuide> {
     return {};
   }
 }
+
