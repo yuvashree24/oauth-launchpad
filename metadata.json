@@ -1,0 +1,6 @@
+{
+  "name": "OAuth Launchpad",
+  "description": "Get your OAuth integration launch-ready. Understand setup requirements, approval timelines, and blockers before you start.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

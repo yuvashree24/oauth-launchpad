@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OAuth Launchpad | Launch-Ready OAuth Guides & Approval Timelines</title>
+    <meta name="description" content="Understand setup requirements, approval timelines, and blockers before you start your OAuth integration." />
+    <meta property="og:title" content="OAuth Launchpad" />
+    <meta property="og:description" content="Understand setup requirements, approval timelines, and blockers before you start your OAuth integration." />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <script>
+      // Safe preview-environment guard for Vite HMR WebSocket connection drops.
+      // In AI Studio preview proxies/iframes, HMR WebSockets cannot establish connections.
+      // This catches the preview-only rejection safely so it does not pollute preview logs.
+      window.addEventListener('unhandledrejection', function(event) {
+        var reason = event.reason;
+        var msg = (reason && (reason.message || (typeof reason === 'string' ? reason : ''))) || '';
+        if (msg.includes('WebSocket closed without opened') || (msg.includes('WebSocket') && msg.includes('closed'))) {
+          event.preventDefault();
+        }
+      });
+      (function() {
+        var origError = console.error;
+        console.error = function() {
+          var firstArg = arguments[0];
+          if (typeof firstArg === 'string' && firstArg.includes('[vite] failed to connect to websocket')) {
+            return;
+          }
+          return origError.apply(console, arguments);
+        };
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+
