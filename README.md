@@ -1,4 +1,9 @@
 # OAuth Launchpad
+## 🚀 Live Demo
+
+**Try OAuth Launchpad:** https://oauthreadyguide26.ai.studio
+
+> Generate an OAuth setup guide for any provider, review evidence and approval requirements, and share the generated guide using a persistent URL.
 
 OAuth Launchpad is an **Integration Readiness & Setup Intelligence** experience built for the Composio Associate Product Manager take-home assignment.
 
